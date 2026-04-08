@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Photo Feed (Online)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #f5f5f5;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background: #222;
+      padding: 15px;
+      text-align: center;
+      font-size: 20px;
+      font-weight: bold;
+    }
+    .container {
+      padding: 15px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #1b1b1b;
+      padding: 15px;
+      border-radius: 10px;
+      margin-bottom: 15px;
+    }
+    input, button, textarea {
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+    }
+    input, textarea {
+      background: #333;
+      color: #f5f5f5;
+    }
+    button {
+      background: #ff0044;
+      color: white;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #444;
+    }
+    .hidden {
+      display: none;
+    }
+    .feed-item {
+      margin-bottom: 20px;
+    }
+    .feed-item img {
+      width: 100%;
+      border-radius: 10px;
+      margin-top: 8px;
+    }
+    .username {
+      font-weight: bold;
+      color: #ff6699;
+    }
+    .caption {
+      margin-top: 4px;
+      font-size: 14px;
+      color: #ddd;
+    }
+    .comment-box {
+      margin-top: 10px;
+      background: #222;
+      padding: 10px;
+      border-radius: 8px;
+    }
+    .comment {
+      margin-top: 6px;
+      padding: 6px;
+      background: #333;
+      border-radius: 6px;
+    }
+    .footer {
+      text-align: center;
+      padding: 10px;
+      color: #777;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+<header>AI Photo Feed (Online)</header>
+
+<div class="container">
+
+  <!-- AUTH -->
+  <div id="auth-card" class="card">
+    <h3 id="auth-title">Create an account</h3>
+
+    <input id="email" placeholder="Email" />
+    <input id="password" type="password" placeholder="Password" />
+
+    <button id="auth-main-btn">Sign up</button>
+    <button class="secondary" id="auth-toggle-btn">Already have an account? Log in</button>
+  </div>
+
+  <!-- USER INFO -->
+  <div id="user-info" class="card hidden">
+    <p>Logged in as <span id="current-user"></span></p>
+    <button class="secondary" id="logout-btn">Log out</button>
+  </div>
+
+  <!-- POST -->
+  <div id="post-card" class="card hidden">
+    <h3>Post an AI-generated photo</h3>
+    <input id="caption" placeholder="Caption" />
+    <input id="image-input" type="file" accept="image/*" />
+    <button id="post-btn">Post photo</button>
+  </div>
+
+  <!-- FEED -->
+  <div id="feed-card" class="card">
+    <h3>Latest AI photos</h3>
+    <div id="feed"></div>
+  </div>
+
+</div>
+
+<div class="footer">
+  Shared online via Firebase – posts & comments visible on all devices.
+</div>
+
+<!-- Firebase (modular v10) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+
+  // Your Firebase config
+  const firebaseConfig = {
+    apiKey: "AIzaSyDPt3NYg1E_Gb47bXXcgxfU9VqgElVeIXE",
+    authDomain: "ai-photo-feed.firebaseapp.com",
+    projectId: "ai-photo-feed",
+    storageBucket: "ai-photo-feed.firebasestorage.app",
+    messagingSenderId: "542512944219",
+    appId: "1:542512944219:web:707319c19fb6048efc5b7e",
+    measurementId: "G-LLFWP0M8PD"
+  };
+
+  // Init Firebase
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const storage = getStorage(app);
+
+  // UI elements
+  const authCard = document.getElementById("auth-card");
+  const authTitle = document.getElementById("auth-title");
+  const authMainBtn = document.getElementById("auth-main-btn");
+  const authToggleBtn = document.getElementById("auth-toggle-btn");
+  const emailInput = document.getElementById("email");
+  const passwordInput = document.getElementById("password");
+
+  const userInfoCard = document.getElementById("user-info");
+  const currentUserSpan = document.getElementById("current-user");
+  const logoutBtn = document.getElementById("logout-btn");
+
+  const postCard = document.getElementById("post-card");
+  const captionInput = document.getElementById("caption");
+  const imageInput = document.getElementById("image-input");
+  const postBtn = document.getElementById("post-btn");
+
+  const feedEl = document.getElementById("feed");
+
+  let authMode = "signup"; // "signup" or "login"
+
+  function setAuthMode(mode) {
+    authMode = mode;
+    if (mode === "signup") {
+      authTitle.textContent = "Create an account";
+      authMainBtn.textContent = "Sign up";
+      authToggleBtn.textContent = "Already have an account? Log in";
+    } else {
+      authTitle.textContent = "Log in";
+      authMainBtn.textContent = "Log in";
+      authToggleBtn.textContent = "Need an account? Sign up";
+    }
+  }
+
+  authToggleBtn.addEventListener("click", () => {
+    setAuthMode(authMode === "signup" ? "login" : "signup");
+  });
+
+  authMainBtn.addEventListener("click", async () => {
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+
+    if (!email || !password) {
+      alert("Enter email and password.");
+      return;
+    }
+
+    try {
+      if (authMode === "signup") {
+        await createUserWithEmailAndPassword(auth, email, password);
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+      emailInput.value = "";
+      passwordInput.value = "";
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+
+  logoutBtn.addEventListener("click", async () => {
+    await signOut(auth);
+  });
+
+  postBtn.addEventListener("click", async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      alert("Log in first.");
+      return;
+    }
+
+    const caption = captionInput.value.trim();
+    const file = imageInput.files[0];
+
+    if (!file) {
+      alert("Select an image.");
+      return;
+    }
+
+    try {
+      const fileRef = ref(storage, "images/" + Date.now() + "_" + file.name);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+
+      await addDoc(collection(db, "posts"), {
+        uid: user.uid,
+        email: user.email,
+        caption: caption || "AI-generated photo",
+        imageUrl: url,
+        comments: [],
+        createdAt: serverTimestamp()
+      });
+
+      captionInput.value = "";
+      imageInput.value = "";
+    } catch (err) {
+      alert("Error posting: " + err.message);
+    }
+  });
+
+  function renderPosts(posts) {
+    if (posts.length === 0) {
+      feedEl.innerHTML = "<p>No posts yet.</p>";
+      return;
+    }
+
+    feedEl.innerHTML = "";
+    posts.forEach((post, index) => {
+      const data = post.data;
+      const id = post.id;
+
+      const div = document.createElement("div");
+      div.className = "feed-item";
+
+      const commentsHtml = (data.comments || [])
+        .map(c => `<div class="comment"><b>${c.email}</b>: ${c.text}</div>`)
+        .join("");
+
+      div.innerHTML = `
+        <div class="username">${data.email || "Unknown user"}</div>
+        <div class="caption">${data.caption || ""}</div>
+        <img src="${data.imageUrl}" alt="AI photo" />
+        <div class="comment-box">
+          <h4>Comments</h4>
+          ${commentsHtml || "<p>No comments yet.</p>"}
+          <textarea id="comment-input-${id}" placeholder="Write a comment..."></textarea>
+          <button data-post-id="${id}">Post Comment</button>
+        </div>
+      `;
+
+      const btn = div.querySelector("button[data-post-id]");
+      btn.addEventListener("click", async () => {
+        const user = auth.currentUser;
+        if (!user) {
+          alert("Log in to comment.");
+          return;
+        }
+        const textarea = div.querySelector(`#comment-input-${id}`);
+        const text = textarea.value.trim();
+        if (!text) return;
+
+        try {
+          const newComments = [...(data.comments || []), { email: user.email, text }];
+          await updateDoc(doc(db, "posts", id), { comments: newComments });
+          textarea.value = "";
+        } catch (err) {
+          alert("Error adding comment: " + err.message);
+        }
+      });
+
+      feedEl.appendChild(div);
+    });
+  }
+
+  // Listen for auth changes
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      authCard.classList.add("hidden");
+      userInfoCard.classList.remove("hidden");
+      postCard.classList.remove("hidden");
+      currentUserSpan.textContent = user.email;
+    } else {
+      authCard.classList.remove("hidden");
+      userInfoCard.classList.add("hidden");
+      postCard.classList.add("hidden");
+      currentUserSpan.textContent = "";
+    }
+  });
+
+  // Live feed from Firestore
+  const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
+  onSnapshot(q, snapshot => {
+    const posts = [];
+    snapshot.forEach(docSnap => {
+      posts.push({ id: docSnap.id, data: docSnap.data() });
+    });
+    renderPosts(posts);
+  });
+
+  // Default mode
+  setAuthMode("signup");
+</script>
+</body>
+</html>
